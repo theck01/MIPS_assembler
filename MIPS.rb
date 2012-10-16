@@ -175,11 +175,11 @@ module MIPS
   def line_memory(tokens)
     case token_type tokens[0]
     when :opcode
-      1
+      4
     when :pseudo_op
-      PSEUDO_OPS[tokens[0]]
+      4*PSEUDO_OPS[tokens[0]]
     when :asm_dir
-      retval = tokens[1].to_f.fdiv(ASM_DIRS[tokens[0]]).ceil
+      retval = 4*tokens[1].to_f.fdiv(ASM_DIRS[tokens[0]]).ceil
       unless retval > 0 || tokens[0] == "ORG"
         raise "Reserved 0 storage with assembler directive #{tokens[0]}"
       end
