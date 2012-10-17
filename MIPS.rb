@@ -3,97 +3,102 @@
 # Computer Organization and Design, 4th ed.
 module MIPS
 
-  # Hash of all available opcodes in this MIPS architecture
-  OPCODES = {  "add"   => [0x00, :type_R],
-               "addi"  => [0x08, :type_I],
-               "addiu" => [0x09, :type_I],
-               "addu"  => [0x00, :type_R],
-               "and"   => [0x00, :type_R],
-               "andi"  => [0x0C, :type_I],
-               "beq"   => [0x04, :type_I],
-               "bne"   => [0x05, :type_I],
-               "j"     => [0x02, :type_J],
-               "jal"   => [0x03, :type_J],
-               "jr"    => [0x00, :type_R],
-               "lbu"   => [0x24, :type_I],
-               "lhu"   => [0x25, :type_I],
-               "ll"    => [0x30, :type_I],
-               "lui"   => [0x0F, :type_I],
-               "lw"    => [0x23, :type_I], 
-               "nor"   => [0x00, :type_R],
-               "or"    => [0x00, :type_R],
-               "ori"   => [0x0D, :type_I],
-               "slt"   => [0x00, :type_R],
-               "slti"  => [0x0A, :type_I],
-               "sltiu" => [0x0B, :type_I],
-               "sltu"  => [0x00, :type_R],
-               "sll"   => [0x00, :type_R],
-               "srl"   => [0x00, :type_R],
-               "sb"    => [0x28, :type_I],
-               "sc"    => [0x38, :type_I],
-               "sh"    => [0x29, :type_I],
-               "sw"    => [0x2B, :type_I],
-               "sub"   => [0x00, :type_R],
-               "subu"  => [0x00, :type_R]  }
+  # Hash of all available opcodes in this MIPS architecture, with associated
+  # values
+  MNEMONICS = { 
+    "add"   => { opcode: 0x00, format: :type_R, funct: 0x20 },
+    "addi"  => { opcode: 0x08, format: :type_I, funct: nil  },
+    "addiu" => { opcode: 0x09, format: :type_I, funct: nil  },
+    "addu"  => { opcode: 0x00, format: :type_R, funct: 0x21 },
+    "and"   => { opcode: 0x00, format: :type_R, funct: 0x24 },
+    "andi"  => { opcode: 0x0C, format: :type_I, funct: nil  },
+    "beq"   => { opcode: 0x04, format: :type_I, funct: nil  },
+    "bne"   => { opcode: 0x05, format: :type_I, funct: nil  },
+    "j"     => { opcode: 0x02, format: :type_J, funct: nil  },
+    "jal"   => { opcode: 0x03, format: :type_J, funct: nil  },
+    "jr"    => { opcode: 0x00, format: :type_R, funct: 0x08 },
+    "lbu"   => { opcode: 0x24, format: :type_I, funct: nil  },
+    "lhu"   => { opcode: 0x25, format: :type_I, funct: nil  },
+    "ll"    => { opcode: 0x30, format: :type_I, funct: nil  },
+    "lui"   => { opcode: 0x0F, format: :type_I, funct: nil  },
+    "lw"    => { opcode: 0x23, format: :type_I, funct: nil  }, 
+    "nor"   => { opcode: 0x00, format: :type_R, funct: 0x27 },
+    "or"    => { opcode: 0x00, format: :type_R, funct: 0x25 },
+    "ori"   => { opcode: 0x0D, format: :type_I, funct: nil  },
+    "slt"   => { opcode: 0x00, format: :type_R, funct: 0x2A },
+    "slti"  => { opcode: 0x0A, format: :type_I, funct: nil  },
+    "sltiu" => { opcode: 0x0B, format: :type_I, funct: nil  },
+    "sltu"  => { opcode: 0x00, format: :type_R, funct: 0x2B },
+    "sll"   => { opcode: 0x00, format: :type_R, funct: 0x00 },
+    "srl"   => { opcode: 0x00, format: :type_R, funct: 0x02 },
+    "sb"    => { opcode: 0x28, format: :type_I, funct: nil  },
+    "sc"    => { opcode: 0x38, format: :type_I, funct: nil  },
+    "sh"    => { opcode: 0x29, format: :type_I, funct: nil  },
+    "sw"    => { opcode: 0x2B, format: :type_I, funct: nil  },
+    "sub"   => { opcode: 0x00, format: :type_R, funct: 0x22 },
+    "subu"  => { opcode: 0x00, format: :type_R, funct: 0x23 } 
+  }
 
   # Hash of supported pseudo operations, with associated number of expanded
   # opcodes after processing
-  PSEUDO_OPS = {  "blt"  => 2,
-                  "bgt"  => 2,
-                  "ble"  => 2,
-                  "bge"  => 2,
-                  "li"   => 2,
-                  "move" => 1  }
+  PSEUDOS = {  
+    "blt"  => { codes: ["slt", "bne"], format: :type_R }, 
+    "bgt"  => { codes: ["slt", "beq"], format: :type_R },
+    "ble"  => { codes: ["slt", "beq"], format: :type_R },
+    "bge"  => { codes: ["slt", "bne"], format: :type_R },
+    "li"   => { codes: ["addi"],       format: :type_I },
+    "move" => { codes: ["addi"],       format: :type_I },  
+  }
 
   # Hash of assembler directives and associated methods 
-  ASM_DIRS = {  "ORG"  => 1.0/0.0,
-                "DC.B" => 4.0,
-                "DC.H" => 2.0,
-                "DC.W" => 1.0}
+  DIRECTIVES = {  "ORG"  => 1.0/0.0,
+                  "DC.B" => 4.0,
+                  "DC.H" => 2.0,
+                  "DC.W" => 1.0  }
 
   # Hash of all available registers in this MIPS architecture
-  REGISTERS = {  "$zero" => 0,
-                 "$at"   => 1,
-                 "$v0"   => 2,
-                 "$v1"   => 3,
-                 "$a0"   => 4,
-                 "$a1"   => 5,
-                 "$a2"   => 6,
-                 "$a3"   => 7,
-                 "$t0"   => 8,
-                 "$t1"   => 9,
-                 "$t2"   => 10,
-                 "$t3"   => 11,
-                 "$t4"   => 12,
-                 "$t5"   => 13,
-                 "$t6"   => 14,
-                 "$t7"   => 15,
-                 "$s0"   => 16,
-                 "$s1"   => 17,
-                 "$s2"   => 18,
-                 "$s3"   => 19,
-                 "$s4"   => 20,
-                 "$s5"   => 21,
-                 "$s6"   => 22,
-                 "$s7"   => 23,
-                 "$t8"   => 24,
-                 "$t9"   => 25,
-                 "$k0"   => 26,
-                 "$k1"   => 27,
-                 "$gp"   => 28,
-                 "$sp"   => 29,
-                 "$fp"   => 30,
-                 "$ra"   => 31  }
+  REGISTERSS = {  "$zero" => 0,
+                  "$at"   => 1,
+                  "$v0"   => 2,
+                  "$v1"   => 3,
+                  "$a0"   => 4,
+                  "$a1"   => 5,
+                  "$a2"   => 6,
+                  "$a3"   => 7,
+                  "$t0"   => 8,
+                  "$t1"   => 9,
+                  "$t2"   => 10,
+                  "$t3"   => 11,
+                  "$t4"   => 12,
+                  "$t5"   => 13,
+                  "$t6"   => 14,
+                  "$t7"   => 15,
+                  "$s0"   => 16,
+                  "$s1"   => 17,
+                  "$s2"   => 18,
+                  "$s3"   => 19,
+                  "$s4"   => 20,
+                  "$s5"   => 21,
+                  "$s6"   => 22,
+                  "$s7"   => 23,
+                  "$t8"   => 24,
+                  "$t9"   => 25,
+                  "$k0"   => 26,
+                  "$k1"   => 27,
+                  "$gp"   => 28,
+                  "$sp"   => 29,
+                  "$fp"   => 30,
+                  "$ra"   => 31  }
   
-  # Dynamically constructed Hash of all symbol values
-  @@symtable = {};
+  # Dynamically constructed Hash of all symbol values, keys = 
+  @@labels = {};
 
   # Start section of machine code in memory (default is 0x0040_0000)
   @@start_addr = 0x0040_0000
 
   def self.assemble(infile)
 
-    self.construct_symtable(infile)
+    self.resolve_labels(infile)
 
     # derive outfile name based on the input name
     if infile.match(/\..*/).to_s.empty?
@@ -115,12 +120,10 @@ module MIPS
     outfile
   end
 
-  private
-
-  def construct_symtable(infile)
+  def self.resolve_labels(infile)
 
     # reset defaults (if not already set)
-    @@symtable = {}
+    @@labels = {}
     @@start_addr = 0x0040_0000
 
     offset = 0 #initial offset
@@ -131,61 +134,102 @@ module MIPS
       input.each do |line|
 
         # break line into individual tokens
-        tokens = line.gsub(/,/, ' ').gsub(/;.*/, '').split
+        lhash = self.hash_line line
 
         # add new symbols, set org if needed
-        @@symtable[tokens[0]] = offset if token_type(tokens[0]) == :unknown
-        if token[0] == "ORG"
+        if self.token_type(lhash[:tokens][0])== :unknown
+           @@labels[lhash[:tokens][0]] = offset 
+        elsif lhash[:tokens][0] == "ORG"
           raise "Multiple ORG assignments" unless @@start_addr == 0x0040_0000
-          @@start_addr = token[1].to_i
+          @@start_addr = lhash[:immediate] 
         end
 
         # increment offset
-        offset += line_memory(tokens)
+        offset += self.line_memory(lhash[:tokens])
       end
     end
   end
 
   # returns an array of 32 bit machine code values
-  def assemble_line(line)
+  def self.assemble_line(line)
+
+    # output machine code array, one element per 32bit word
     code_ary = [];
 
-    # Break the line up into individual tokens, ignoring the comments
+    # Break the line up into individual tokens
+    tokens = self.hash_line line
+  end
+
+  # break line into token array, dealing with special immediate indexing
+  # syntax if needed. Returns array of tokens
+  def self.hash_line(line)
+
+    #initialize hash with value of line
+    lhash = { line: line }
+    
+    #split line
     tokens = line.gsub(/,/, ' ').gsub(/;.*/, '').split
+
+    #search for and handle first occurance of immediate data syntax
+    tokens.each_with_index do | word, idx |
+      unless word.match(/0x[0-9A-F]+\(.*\)/).to_s.empty? &&
+             word.match(/[0-9]+\(.*\)/).to_s.empty?
+        #break up immeadiate data syntax into a :register and :immediate array
+        chunks = word.sub(/\)/, '').split('(')
+        tokens[idx] = chunks[1]; # substitute current element with :register
+        tokens.insert idx chunks[0]
+        return
+      end
+    end
+    
+    # set the tokens properly within the line
+    lhash[:tokens] = tokens
+
+    self.fill_hash_fields lhash
+  end
+
+  # Fills the fields of hash corresponding to the machine code fields
+  def self.fill_hash_fields(lhash)
+    lhash[:tokens].each do |token|
+      
   end
 
   # returns the token type in assembly terms as a symbol
-  def token_type(token)
-    if OPCODES[token.downcase]
-      :opcode
-    elsif PSEUDO_OPS[token.downcase]
-      :pseudo_op
-    elsif ASM_DIRS[token]
-      :asm_dir
-    elsif REGISTER[token.downcase]
+  def self.token_type(token)
+    if MNEMONICS[token.downcase]
+      :mnemonic
+    elsif PSEUDOS[token.downcase]
+      :pseudo
+    elsif DIRECTIVES[token]
+      :directive
+    elsif REGISTERS[token.downcase]
       :register
-    elsif @@symtable[token]
+    elsif @@labels[token]
       :label
+    elsif token.match(/0x[A-F0-9]+/).to_s.size == token.size ||
+          token.match(/[0-9]+/).to_s.size == token.size
+      :immediate
     else
       :unknown
     end
   end
 
   # returns the the amount of memory that a line reserves
-  def line_memory(tokens)
-    case token_type tokens[0]
-    when :opcode
+  # OUTDATED
+  def self.line_memory(tokens)
+    case self.token_type tokens[0]
+    when :mnemonic
       4
-    when :pseudo_op
-      4*PSEUDO_OPS[tokens[0]]
-    when :asm_dir
-      retval = 4*tokens[1].to_f.fdiv(ASM_DIRS[tokens[0]]).ceil
+    when :pseudo
+      4*PSEUDOS[tokens[0]][:codes].size
+    when :directive
+      retval = 4*tokens[1].to_f.fdiv(DIRECTIVES[tokens[0]]).ceil
       unless retval > 0 || tokens[0] == "ORG"
         raise "Reserved 0 storage with assembler directive #{tokens[0]}"
       end
       retval
-    when :label, :unknown
-      line_memory(tokens[1...tokens.size])
+    when :label
+      self.line_memory(tokens[1...tokens.size])
     else
       raise "Cannot lead a statement with term: #{tokens[0]}"
     end
