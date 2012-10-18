@@ -42,53 +42,36 @@ module MIPS
   # Hash of supported pseudo operations, with associated number of expanded
   # opcodes after processing
   PSEUDOS = {  
-    "blt"  => { codes: ["slt", "bne"], format: :type_R }, 
-    "bgt"  => { codes: ["slt", "beq"], format: :type_R },
-    "ble"  => { codes: ["slt", "beq"], format: :type_R },
-    "bge"  => { codes: ["slt", "bne"], format: :type_R },
-    "li"   => { codes: ["addi"],       format: :type_I },
-    "move" => { codes: ["addi"],       format: :type_I },  
+    "blt"  => { mnemonics: ["slt", "bne"], format: :type_R }, 
+    "bgt"  => { mnemonics: ["slt", "beq"], format: :type_R },
+    "ble"  => { mnemonics: ["slt", "beq"], format: :type_R },
+    "bge"  => { mnemonics: ["slt", "bne"], format: :type_R },
+    "li"   => { mnemonics: ["addi"],       format: :type_I },
+    "move" => { mnemonics: ["addi"],       format: :type_I },  
   }
 
   # Hash of assembler directives and associated methods 
-  DIRECTIVES = {  "ORG"  => 1.0/0.0,
-                  "DC.B" => 4.0,
-                  "DC.H" => 2.0,
-                  "DC.W" => 1.0  }
+  DIRECTIVES = {  
+    "ORG"  => { storage_per_word: nil },
+    "DC.B" => { storage_per_word: 4.0, type: :const },
+    "DS.B" => { storage_per_word: 4.0, type: :var   },
+    "DC.H" => { storage_per_word: 2.0, type: :const },
+    "DS.H" => { storage_per_word: 2.0, type: :var   },
+    "DC.W" => { storage_per_word: 1.0, type: :const },
+    "DS.W" => { storage_per_word: 1.0  type: :var   }
+  }
 
   # Hash of all available registers in this MIPS architecture
-  REGISTERSS = {  "$zero" => 0,
-                  "$at"   => 1,
-                  "$v0"   => 2,
-                  "$v1"   => 3,
-                  "$a0"   => 4,
-                  "$a1"   => 5,
-                  "$a2"   => 6,
-                  "$a3"   => 7,
-                  "$t0"   => 8,
-                  "$t1"   => 9,
-                  "$t2"   => 10,
-                  "$t3"   => 11,
-                  "$t4"   => 12,
-                  "$t5"   => 13,
-                  "$t6"   => 14,
-                  "$t7"   => 15,
-                  "$s0"   => 16,
-                  "$s1"   => 17,
-                  "$s2"   => 18,
-                  "$s3"   => 19,
-                  "$s4"   => 20,
-                  "$s5"   => 21,
-                  "$s6"   => 22,
-                  "$s7"   => 23,
-                  "$t8"   => 24,
-                  "$t9"   => 25,
-                  "$k0"   => 26,
-                  "$k1"   => 27,
-                  "$gp"   => 28,
-                  "$sp"   => 29,
-                  "$fp"   => 30,
-                  "$ra"   => 31  }
+  REGISTERSS = { 
+    "$zero" => 0,  "$at" => 1,  "$v0" => 2,  "$v1" => 3,
+    "$a0"   => 4,  "$a1" => 5,  "$a2" => 6,  "$a3" => 7,
+    "$t0"   => 8,  "$t1" => 9,  "$t2" => 10, "$t3" => 11,
+    "$t4"   => 12, "$t5" => 13, "$t6" => 14, "$t7" => 15,
+    "$s0"   => 16, "$s1" => 17, "$s2" => 18, "$s3" => 19,
+    "$s4"   => 20, "$s5" => 21, "$s6" => 22, "$s7" => 23,
+    "$t8"   => 24, "$t9" => 25, "$k0" => 26, "$k1" => 27,
+    "$gp"   => 28, "$sp" => 29, "$fp" => 30, "$ra" => 31
+  }
   
   # Dynamically constructed Hash of all symbol values, keys = 
   @@labels = {};
@@ -110,8 +93,12 @@ module MIPS
     # Assemble each line of the source file and output string to outfile
     File.open(outfile, "w") do |output|
       File.open(infile, "r") do |input|
+        line_num = 0
         input.each do |line|
-          self.assemble_line(line).each { |code| output.puts code }
+          line_num += 1
+          next if line.chomp == "" #skip blank lines
+          lhash = hash_line line line_num
+          self.assemble_line(lhash).each { |code| output.puts code }
         end
       end
     end
@@ -131,41 +118,47 @@ module MIPS
     
     # begin reading in file
     File.open infile do |input|
+
+      line_num = 0
+
       input.each do |line|
 
+        line_num += 1
+        next if line.chomp == "" #skip blank lines
+
         # break line into individual tokens
-        lhash = self.hash_line line
+        lhash = self.hash_line line line_num
 
         # add new symbols, set org if needed
-        if self.token_type(lhash[:tokens][0])== :unknown
-           @@labels[lhash[:tokens][0]] = offset 
-        elsif lhash[:tokens][0] == "ORG"
-          raise "Multiple ORG assignments" unless @@start_addr == 0x0040_0000
-          @@start_addr = lhash[:immediate] 
+        if lhash[:tokens][0][:type] == :unknown
+           @@labels[lhash[:tokens][0][:field]] = offset 
+        elsif lhash[:tokens][0][:field] == "ORG"
+          unless @@start_addr == 0x0040_0000
+            raise asm_err "Second ORG assignment"
+          end
+          @@start_addr = lhash[:tokens][1][:field].to_i
         end
 
         # increment offset
-        offset += self.line_memory(lhash[:tokens])
+        offset += self.line_memory(lhash)
       end
     end
   end
 
   # returns an array of 32 bit machine code values
-  def self.assemble_line(line)
+  def self.assemble_line(lhash)
 
     # output machine code array, one element per 32bit word
     code_ary = [];
 
-    # Break the line up into individual tokens
-    tokens = self.hash_line line
   end
 
   # break line into token array, dealing with special immediate indexing
   # syntax if needed. Returns array of tokens
-  def self.hash_line(line)
+  def self.hash_line(line, line_num)
 
-    #initialize hash with value of line
-    lhash = { line: line }
+    #initialize hash with value of line and number
+    lhash = { line: line, number: line_num }
     
     #split line
     tokens = line.gsub(/,/, ' ').gsub(/;.*/, '').split
@@ -181,17 +174,22 @@ module MIPS
         return
       end
     end
-    
-    # set the tokens properly within the line
-    lhash[:tokens] = tokens
 
-    self.fill_hash_fields lhash
-  end
+    # assume that the line is a directive unless notified otherwise
+    lhash[:format] = :directive
 
-  # Fills the fields of hash corresponding to the machine code fields
-  def self.fill_hash_fields(lhash)
-    lhash[:tokens].each do |token|
-      
+    lhash[:tokens] = tokens.map do | word |
+      word_hash[:field] = word
+      # alter the format if the word type is a :mnemonic, while also setting
+      # the type to the proper value
+      if (word_hash[:type] = self.token_type word) == :mnemonic
+        lhash[:format] = MNEMONICS[word][:format]
+      end
+
+      word_hash
+    end
+
+    lhash
   end
 
   # returns the token type in assembly terms as a symbol
@@ -200,7 +198,7 @@ module MIPS
       :mnemonic
     elsif PSEUDOS[token.downcase]
       :pseudo
-    elsif DIRECTIVES[token]
+    elsif DIRECTIVES[token.upcase]
       :directive
     elsif REGISTERS[token.downcase]
       :register
@@ -215,23 +213,34 @@ module MIPS
   end
 
   # returns the the amount of memory that a line reserves
-  # OUTDATED
-  def self.line_memory(tokens)
-    case self.token_type tokens[0]
+  def self.line_memory(lhash)
+
+    tokens = lhash[:tokens]
+
+    # skip over labels in the line
+    tokens = tokens[1...tokens.size] while tokens[0][:type] == :label
+    
+    case tokens[0][:type]
     when :mnemonic
       4
     when :pseudo
-      4*PSEUDOS[tokens[0]][:codes].size
+      4*PSEUDOS[tokens[0][:field]][:codes].size
     when :directive
-      retval = 4*tokens[1].to_f.fdiv(DIRECTIVES[tokens[0]]).ceil
-      unless retval > 0 || tokens[0] == "ORG"
-        raise "Reserved 0 storage with assembler directive #{tokens[0]}"
+      retval = 4*tokens[1].to_f.fdiv(DIRECTIVES[tokens[0][:field]).ceil
+      unless retval > 0 || tokens[0][:field] == "ORG"
+        raise asm_err "Reserved 0 storage with assembler directive
+        #{tokens[0][:field]}"
       end
       retval
-    when :label
-      self.line_memory(tokens[1...tokens.size])
     else
-      raise "Cannot lead a statement with term: #{tokens[0]}"
+      raise asm_err "Cannot lead a statement with unknown: #{tokens[0][:field]}"
     end
+  end
+
+  # returns an error string corresponding to line represented by lhash with
+  # additional message err_str
+  def self.asm_err(lhash, err_str)
+    "ERROR: #{err_str}
+    line #{lhash[:number]}: #{lhash[:line]}"
   end
 end
