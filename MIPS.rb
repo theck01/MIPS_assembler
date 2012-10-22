@@ -2,6 +2,8 @@
 # assembler. The specific instruction set can be found in the book:
 # Computer Organization and Design, 4th ed.
 
+require 'pry'
+
 module MIPS
 
   #-----------------------------------------------------------------------------
@@ -99,6 +101,8 @@ module MIPS
                 format: [:directive, :immediate, :immediate] },
     "DS.B" => { per_word: 4.0, dirtype: :dir_var,
                 format: [:directive, :immediate] },
+    ".BYTE"=> { per_word: 4.0, dirtype: :dir_const,
+                format: [:directive, :immediate, :immediate] },
     "DC.H" => { per_word: 2.0, dirtype: :dir_const,
                 format: [:directive, :immediate, :immediate] },
     "DS.H" => { per_word: 2.0, dirtype: :dir_var,
@@ -106,7 +110,8 @@ module MIPS
     "DC.W" => { per_word: 1.0, dirtype: :dir_const,
                 format: [:directive, :immediate, :immediate] },
     "DS.W" => { per_word: 1.0, dirtype: :dir_var,
-                format: [:directive, :immediate] }
+                format: [:directive, :immediate] },
+    "END"  => { format: [:directive] }
   }
 
   # Hash of all available registers in this MIPS architecture
@@ -151,13 +156,34 @@ module MIPS
         line_num = 0
         offset = 0
 
+        start_str = padstr(@@start_addr.to_s(16),8)
+        output.puts "# Starting ASM program at 0x#{start_str}"
+
         input.each do |line|
+
           line_num += 1
           lhash = hashline(line,line_num)
           next if lhash[:tokens].empty? #skip blank lines
           offset += self.line_memory(lhash)
+
+          # check to see if END directive found
+          break if self.check_end? lhash
+          
+          output.puts ""
+          output.puts "# #{lhash[:line]}"
           self.assemble_line(lhash, offset).each { |code| output.puts code }
+          output.puts "# Mem Addr: 0x#{padstr((@@start_addr + offset).to_s(16),8)}"
         end
+        
+        end_str = padstr((@@start_addr + offset).to_s(16),8)
+        output.puts "# Ending ASM program at 0x#{end_str}"
+      end
+
+      output.puts ""
+      output.puts "# SYMBOL TABLE"
+      output.puts "#--------------"
+      @@labels.to_a.each do
+        |pair| output.puts "# #{pair[0]}, 0x#{pair[1].to_s(16)}"
       end
     end
     
@@ -200,7 +226,11 @@ module MIPS
             asm_err(lhash,"Second ORG assignment")
           end
           @@start_addr = lhash[:tokens][1][:field]
+        elsif self.check_end? lhash
+          break
         end
+
+        break if self.check_end? lhash
 
         # increment offset
         offset += self.line_memory(lhash)
@@ -267,13 +297,13 @@ module MIPS
 
     # create the array of "machine code" strings from each mnemonic hash
     mnemonic_hashes.map do |mnemonic_hash|
-      case args[:optype]
+      case mnemonic_hash[:optype]
       when :R
-        self.assemble_type_R args
+        self.assemble_type_R mnemonic_hash
       when :I
-        self.assemble_type_I args
+        self.assemble_type_I mnemonic_hash
       else
-        self.assemble_type_J args
+        self.assemble_type_J mnemonic_hash
       end
     end
   end
@@ -283,24 +313,17 @@ module MIPS
   def self.process_directive(lhash, dir_hash)
 
     if dir_hash[:imm2] 
-      constant = self.padstr(dir_hash[:imm2].to_s(2),32/dir_hash[:bytes])
-      constant *= dir_hash[:bytes]
-      
-      # if the field is too large for 32 bit int
-      if constant.length > 32
-        asm_err(lhash, "Field value #{dir_hash[:imm2].to_s(16)} to great for directive field")
-      end
-
-      # pad with as many zeros as are necesarry
-      output_val = self.padstr(constant, 32)
+      element = self.padstr(dir_hash[:imm2].to_s(2),32/dir_hash[:bytes])
+      constant = element * dir_hash[:bytes] 
       out_array = Array.new(dir_hash[:imm1].div(dir_hash[:bytes]), constant)
-      out_array<<padstr(dir_hash[:imm1].modulo(dir_hash[:bytes]).to_i.to_s, 32)
+
+      last_word = element * dir_hash[:imm1].modulo(dir_hash[:bytes])
+      out_array<<padstr(last_word, 32)
+      out_array
     else
       output_val = "----- RESERVED FOR STORAGE -----"
       Array.new(dir_hash[:imm1], output_val)
     end
-
-    Array.new(dir_hash[:imm1], output_val)
   end
 
 
@@ -358,7 +381,7 @@ module MIPS
     output = output << padstr((args[:funct] || 0).to_s(2), 6)
   end
 
-  # assemble R type instruction with associated args
+  # assemble I type instruction with associated args
   def self.assemble_type_I args
     output = ""
     output = output << padstr((args[:opcode] || 0).to_s(2), 6)
@@ -367,10 +390,11 @@ module MIPS
     output = output << padstr((args[:imm] || 0).to_s(2), 16)
   end
 
+  # assemble J type instruction with associated args
   def self.assemble_type_J args
     output = ""
     output = output << padstr((args[:opcode] || 0).to_s(2), 6)
-    output = output << padstr((args[:abs_imm] || 0).to_s(2), 26)
+    output = output << padstr((args[:imm_abs] || 0).to_s(2), 26)
   end
 
 
@@ -490,7 +514,7 @@ module MIPS
     when :pseudo
       4*tokens[0][:info][:codes]
     when :directive
-      return 0 if tokens[0][:field] == "ORG"
+      return 0 if tokens[0][:field] == "ORG" || tokens[0][:field] == "END"
       retval = (tokens[1][:field].to_f.fdiv(tokens[0][:info][:per_word])).ceil
       retval *= 4
       unless retval > 0 
@@ -518,7 +542,7 @@ module MIPS
     end
 
     # skip over labels in the line
-    if tokens[0][:type] == :label || tokens[0][:type] == :immediate
+    if tokens[0][:type] == :label 
       tokens = tokens[1...tokens.size] 
     end
 
@@ -547,11 +571,28 @@ module MIPS
   end
 
 
+  #function returns true if lhash represents END directive, false if not
+  def self.check_end?(lhash)
+
+    # get tokens, skipping first label
+    tokens = lhash[:tokens]
+    if tokens[0][:type] == :label || tokens[0][:type] == :unknown
+      tokens = tokens[1...tokens.size]
+    end
+
+    if tokens[0][:field] == "END"
+      true
+    else
+      false
+    end
+  end
+    
+
   # pads the string of numbers with 0's or remove digits until it is equal to 
   # length
   def self.padstr(num_str, length)
     if num_str.to_i < 0
-      num_str = ((num_str.to_i)&0x0FFFFFF).to_s(2)
+      num_str = ((num_str.to_i)&0xFFFFFFF).to_s(2)
     end
     return num_str if num_str.length == length
     return ("0"*(length-num_str.length))<<num_str if num_str.length < length
@@ -562,6 +603,7 @@ module MIPS
   # returns an error string corresponding to line represented by lhash with
   # additional message err_str
   def self.asm_err(lhash, err_str)
+    raise err_str
     abort("ASSEMBLER ERROR: #{err_str}\nline #{lhash[:number]}: #{lhash[:line]}")
   end
 end
