@@ -97,6 +97,7 @@ module MIPS
   # Hash of assembler directives and associated methods 
   DIRECTIVES = {  
     "ORG"  => { format: [:directive, :immediate] }, 
+    ".ORG"  => { format: [:directive, :immediate] }, 
     "DC.B" => { per_word: 4.0, dirtype: :dir_const,
                 format: [:directive, :immediate, :immediate] },
     "DS.B" => { per_word: 4.0, dirtype: :dir_var,
@@ -221,7 +222,7 @@ module MIPS
         if lhash[:tokens][0][:type] == :unknown
            @@labels[lhash[:tokens][0][:field]] = offset 
         # update start_addr if ORG directive encountered
-        elsif lhash[:tokens][0][:field] == "ORG"
+        elsif lhash[:tokens][0][:field].match(/\A\.?ORG\Z/).to_s.empty?
           unless @@start_addr == 0x0040_0000
             asm_err(lhash,"Second ORG assignment")
           end
@@ -252,7 +253,10 @@ module MIPS
 
     # return directive result, if line represents directive
     if tokens[0][:type] == :directive
-      return [] if tokens[0][:field] == "ORG" # ORG assembles to nothing
+
+      # ORG assembles to nothing
+      return [] if tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty?
+
       dir_hash = { dirtype: tokens[0][:info][:dirtype],
                    imm1: tokens[1][:field], bytes: tokens[0][:info][:per_word] }
       dir_hash[:imm2] = tokens[2][:field] if tokens[2]
@@ -514,7 +518,13 @@ module MIPS
     when :pseudo
       4*tokens[0][:info][:codes]
     when :directive
-      return 0 if tokens[0][:field] == "ORG" || tokens[0][:field] == "END"
+
+      # ORG assignments use no memory
+      if tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty? || 
+         tokens[0][:field] == "END"
+        return 0
+      end
+
       retval = (tokens[1][:field].to_f.fdiv(tokens[0][:info][:per_word])).ceil
       retval *= 4
       unless retval > 0 
