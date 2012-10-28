@@ -80,18 +80,20 @@ module MIPS
   # Hash of supported pseudo operations, with associated number of expanded
   # opcodes after processing
   PSEUDOS = {  
-    "blt"  => { codes: 2, optype: :I,
-                format: [:pseudo, :register, :register, :immediate] }, 
-    "bgt"  => { codes: 2, optype: :I,
-                format: [:pseudo, :register, :register, :immediate] },
-    "ble"  => { codes: 2, optype: :I,
-                format: [:pseudo, :register, :register, :immediate] },
-    "bge"  => { codes: 2, optype: :I,
-                format: [:pseudo, :register, :register, :immediate] },
-    "li"   => { codes: 1, optype: :I,
-                format: [:pseudo, :register, :immediate] },
-    "move" => { codes: 1, optype: :R,
-                format: [:mnemonic, :register, :register] },  
+    "blt"   => { codes: 2, optype: :I,
+                 format: [:pseudo, :register, :register, :immediate] }, 
+    "bgt"   => { codes: 2, optype: :I,
+                 format: [:pseudo, :register, :register, :immediate] },
+    "ble"   => { codes: 2, optype: :I,
+                 format: [:pseudo, :register, :register, :immediate] },
+    "bge"   => { codes: 2, optype: :I,
+                 format: [:pseudo, :register, :register, :immediate] },
+    "li"    => { codes: 1, optype: :I,
+                 format: [:pseudo, :register, :immediate] },
+    "move"  => { codes: 1, optype: :R,
+                 format: [:pseudo, :register, :register] },  
+    "clear" => { codes: 1, optype: :I,
+                 format: [:pseudo, :register] },
   }
 
   # Hash of assembler directives and associated methods 
@@ -102,8 +104,8 @@ module MIPS
                 format: [:directive, :immediate, :immediate] },
     "DS.B" => { per_word: 4.0, dirtype: :dir_var,
                 format: [:directive, :immediate] },
-    ".BYTE"=> { per_word: 4.0, dirtype: :dir_const,
-                format: [:directive, :immediate, :immediate] },
+    ".BYTE"=> { per_word: 4.0, dirtype: :byte_list,
+                format: [:directive, :imm_list] },
     "DC.H" => { per_word: 2.0, dirtype: :dir_const,
                 format: [:directive, :immediate, :immediate] },
     "DS.H" => { per_word: 2.0, dirtype: :dir_var,
@@ -112,7 +114,8 @@ module MIPS
                 format: [:directive, :immediate, :immediate] },
     "DS.W" => { per_word: 1.0, dirtype: :dir_var,
                 format: [:directive, :immediate] },
-    "END"  => { format: [:directive] }
+    "END"  => { format: [:directive] },
+    ".END" => { format: [:directive] }
   }
 
   # Hash of all available registers in this MIPS architecture
@@ -220,9 +223,11 @@ module MIPS
 
         # add new symbols, set org if needed
         if lhash[:tokens][0][:type] == :unknown
-           @@labels[lhash[:tokens][0][:field]] = offset 
+          # remove : suffix if exists
+          label = lhash[:tokens][0][:field].sub(/\:/, '')
+          @@labels[label]= offset 
         # update start_addr if ORG directive encountered
-        elsif lhash[:tokens][0][:field].match(/\A\.?ORG\Z/).to_s.empty?
+        elsif lhash[:tokens][0][:field].match(/\A\.?ORG\Z/).to_s.empty? == false
           unless @@start_addr == 0x0040_0000
             asm_err(lhash,"Second ORG assignment")
           end
@@ -255,7 +260,7 @@ module MIPS
     if tokens[0][:type] == :directive
 
       # ORG assembles to nothing
-      return [] if tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty?
+      return [] unless tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty?
 
       dir_hash = { dirtype: tokens[0][:info][:dirtype],
                    imm1: tokens[1][:field], bytes: tokens[0][:info][:per_word] }
@@ -264,15 +269,15 @@ module MIPS
     end
       
     # setup local data to parse token array
-    i = 0
     registers = if tokens[0][:info][:optype] == :R
       [:rd, :rs, :rt]
     else
       [:rt, :rs]
     end
-
-    #initialize arg hash
+    i = 0
     args = {}
+
+
     tokens.each do |token|
       case token[:type] 
       when :mnemonic
@@ -316,13 +321,31 @@ module MIPS
   # return an array of string values representing directive
   def self.process_directive(lhash, dir_hash)
 
-    if dir_hash[:imm2] 
+    # Process .byte style directive first
+    if dir_hash[:dirtype] == :byte_list
+
+      immdata = lhash[:tokens][1..-1]
+      immdata = lhash[:tokens][1..-1] if immdata[0][:type] == :directive
+
+      # create output strings from groups of 4 bytes
+      output_array = []
+      immdata.each_with_index do |field, i; nextstr|
+        output_array[i/4] = "" if i%4 == 0
+        nextstr = (immdata[i][:field]&0xFFFFFFFF).to_s(2)
+        output_array[i/4] << self.padstr(nextstr, 32/dir_hash[:bytes])
+      end
+
+      # pad final string, which may not be complete if byte number is not a
+      # multiple of 4
+      output_array[-1] = self.padstr(output_array[-1], 32)
+      output_array
+    elsif dir_hash[:imm2] 
       element = self.padstr(dir_hash[:imm2].to_s(2),32/dir_hash[:bytes])
       constant = element * dir_hash[:bytes] 
       out_array = Array.new(dir_hash[:imm1].div(dir_hash[:bytes]), constant)
 
       last_word = element * dir_hash[:imm1].modulo(dir_hash[:bytes])
-      out_array<<padstr(last_word, 32)
+      out_array<<self.padstr(last_word, 32)
       out_array
     else
       output_val = "----- RESERVED FOR STORAGE -----"
@@ -366,10 +389,13 @@ module MIPS
       [first,second]
     when "li"
       [ { opcode: MNEMONICS["addi"][:opcode], rt: args[:rt],
-          rt: REGISTERS["$zero"], imm: args[:imm], optype: :I } ]
+          rs: REGISTERS["$zero"], imm: args[:imm], optype: :I } ]
     when "move"
       [ { opcode: MNEMONICS["addi"][:opcode], rt: args[:rt], rt: args[:rs],
           imm: 0, optype: :I } ]
+    when "clear"  
+      [ { opcode: MNEMONICS["andi"][:opcode], rt: args[:rt],
+          rs: REGISTERS["$zero"], optype: :I } ]
     end
   end
 
@@ -419,7 +445,6 @@ module MIPS
       #into two tokens, one for the register and one for the offset
       unless word.match(/0x[0-9A-F]+\(.*\)/).to_s.empty? &&
              word.match(/[0-9]+\(.*\)/).to_s.empty?
-
         #break up immediate data syntax into a :register and :immediate array
         chunks = word.sub(/\)/, '').split('(')
         tokens[idx] = chunks[0]; # substitute current element with :register
@@ -451,10 +476,12 @@ module MIPS
       :directive
     elsif REGISTERS[token.downcase]
       :register
-    elsif @@labels[token]
+    elsif @@labels[token.sub(/\:/, '')]
       :label
-    elsif token.match(/0x[A-F0-9]+/).to_s.size == token.size ||
-          token.match(/[0-9]+/).to_s.size == token.size
+    elsif token.match(/\A0x[A-F0-9]+\Z/).to_s.empty? == false ||
+          token.match(/\A[0-9]+\Z/).to_s.empty? == false ||
+          token.match(/\A[0-1]+B\Z/).to_s.empty? == false ||
+          token.match(/\A[A-F0-9]+H\Z/).to_s.empty? == false
       :immediate
     else
       :unknown
@@ -470,8 +497,12 @@ module MIPS
     when :directive
       field.upcase
     when :immediate
-      unless field.match(/0x[0-9A-F]+/).to_s.empty?
+      if field.match(/\A0x[0-9A-F]+\Z/).to_s.empty? == false
         field.to_i(16)
+      elsif field.match(/\A[0-9A-F]+H\Z/).to_s.empty? == false
+        field[0...(field.size-1)].to_i(16)
+      elsif field.match(/\A[0,1]+B\Z/).to_s.empty? == false
+        field[0...(field.size-1)].to_i(2)
       else
         field.to_i
       end
@@ -519,10 +550,15 @@ module MIPS
       4*tokens[0][:info][:codes]
     when :directive
 
-      # ORG assignments use no memory
-      if tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty? || 
-         tokens[0][:field] == "END"
+      # catch directives that use no memory
+      unless tokens[0][:field].match(/\A\.?ORG\Z/).to_s.empty? &&
+             tokens[0][:field].match(/\A\.?END\Z/).to_s.empty?
         return 0
+      end
+
+      # BYTE assignments use variable memory
+      if tokens[0][:info][:dirtype] == :byte_list
+        return ((tokens.size-1).fdiv(tokens[0][:info][:per_word]).ceil)*4
       end
 
       retval = (tokens[1][:field].to_f.fdiv(tokens[0][:info][:per_word])).ceil
@@ -562,15 +598,29 @@ module MIPS
       asm_err(lhash, "Statement does not begin with mnemonic or assembler directive")
     end
 
-    # check that arguments to keyword
+    # Process .byte directive on its own
+    if tokens[0][:info][:dirtype] == :byte_list
+
+      #drop directive token, only interested in immedate data arguments
+      tokens = tokens[1...tokens.size]
+      types = tokens.map { |token| token[:type] }
+      types.uniq!
+      if types.size != 1 && types[0] != :immediate
+        asm_err(lhash, "Types passed to '#{tokens[0][:field]}' should only be immediate data")
+      end
+      return nil
+    end
+
+    # check proper number of arguments to keyword
     unless tokens.size == tokens[0][:info][:format].size
       asm_err(lhash,"Unexpected number of arguments to assembler keyword '#{tokens[0][:field]}'")
     end
     
     # check that token types match with token format
     types = tokens.map do |token| 
-      return token[:type] unless token[:type] == :label
-      :immediate
+      kind = token[:type]
+      kind = :immediate if token[:type] == :label
+      kind
     end
 
     unless tokens[0][:info][:format] == types
@@ -590,7 +640,7 @@ module MIPS
       tokens = tokens[1...tokens.size]
     end
 
-    if tokens[0][:field] == "END"
+    if !tokens[0][:field].match(/\A\.?END\Z/).to_s.empty?
       true
     else
       false
@@ -613,7 +663,6 @@ module MIPS
   # returns an error string corresponding to line represented by lhash with
   # additional message err_str
   def self.asm_err(lhash, err_str)
-    raise err_str
     abort("ASSEMBLER ERROR: #{err_str}\nline #{lhash[:number]}: #{lhash[:line]}")
   end
 end
