@@ -2,8 +2,6 @@
 # assembler. The specific instruction set can be found in the book:
 # Computer Organization and Design, 4th ed.
 
-require 'pry'
-
 module MIPS
 
   #-----------------------------------------------------------------------------
@@ -148,9 +146,9 @@ module MIPS
 
     # derive outfile name based on the input name
     if infile.match(/\..*/).to_s.empty?
-      outfile = "#{infile}.o"
+      outfile = "#{infile}.lst"
     else
-      outfile = infile.sub(/\..*/, '.o')
+      outfile = infile.sub(/\..*/, '.lst')
     end
 
     # Assemble each line of the source file and output string to outfile
@@ -189,6 +187,8 @@ module MIPS
       @@labels.to_a.each do
         |pair| output.puts "# #{pair[0]}, 0x#{pair[1].to_s(16)}"
       end
+
+      puts "Assembled #{infile} into #{outfile}"
     end
     
     # return outfile name
@@ -654,7 +654,6 @@ module MIPS
     if num_str.to_i < 0
       num_str = ((num_str.to_i)&0xFFFFFFF).to_s(2)
     end
-    return num_str if num_str.length == length
     return ("0"*(length-num_str.length))<<num_str if num_str.length < length
     num_str[0...length]
   end
