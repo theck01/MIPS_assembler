@@ -435,8 +435,8 @@ module MIPS
     #initialize hash with value of line and number
     lhash = { line: line, number: line_num }
     
-    #split line
-    tokens = line.gsub(/,/, ' ').gsub(/;.*/, '').split
+    #split line, substituting commas and removing comments
+    tokens = line.gsub(/,/, ' ').gsub(/;.*/, '').gsub(/\/\/.*/, '').split
 
     #search for and handle first occurance of immediate data syntax
     tokens.each_with_index do | word, idx |
